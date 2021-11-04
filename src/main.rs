@@ -152,10 +152,15 @@ impl Surface for Sphere {
         if discriminant < 0.0 {
             None
         } else {
-            let t = (-b - discriminant.sqrt()) / (2.0*a);
+
+            let mut t = (-b - discriminant.sqrt()) / (2.0*a);
 
             if t < 0.0 {
-                return None
+                t = (-b + discriminant.sqrt()) / (2.0*a);
+
+                if t < 0.0 {
+                    return None
+                }
             }
 
             let p = ray.origin + t * ray.direction;
@@ -164,7 +169,7 @@ impl Surface for Sphere {
     }
 
     fn get_norm(&self, location: Point) -> Point {
-        (location - self.center).unit()
+        -1.0 * (location - self.center).unit()
     }
 
     fn get_relfectivity(&self) -> f64 {
@@ -357,22 +362,19 @@ fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSo
             Some(os) => !std::ptr::eq(os, plane)
         };
 
-        // if ! check_for_collision {
-        //     dbg!("Not checking");
-        // }
-
         if check_for_collision {
             match plane.intercept(&ray) {
                 None => {},
                 Some(intercept) => {
-                    match smallest_intercept {
-                        None => { 
-                            smallest_intercept = Some((intercept, plane));
-                        
-                        },
-                        Some(existing) => {
-                            if intercept.distance < existing.0.distance {
-                                smallest_intercept = Some((intercept, plane))
+                    if intercept.distance > 0.01 {
+                        match smallest_intercept {
+                            None => { 
+                                smallest_intercept = Some((intercept, plane));
+                            },
+                            Some(existing) => {
+                                if intercept.distance < existing.0.distance {
+                                    smallest_intercept = Some((intercept, plane))
+                                }
                             }
                         }
                     }
@@ -393,10 +395,6 @@ fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSo
 
             if reflectivity > 0.0 && bounces_remaining > 0 {
 
-                // dbg!(inbound.elems());
-                // dbg!(norm.elems());
-                // dbg!(t_ray.direction.elems());
-
                 let bounce_dir = inbound - 2.0 * (inbound.dot(norm) * norm);
                 let b_ray = Ray::new(bounce_dir, intercept.location);
 
@@ -408,18 +406,11 @@ fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSo
             if transmissivity > 0.0 {
                 let mut mu = refractive_index/n2_refractive_index;
                 if n2_refractive_index == refractive_index {
-                    // dbg!("flipping back");
                     mu = n2_refractive_index/1.0;
                 }
 
                 let t_dir = (1.0 - mu*mu * (1.0 - norm.dot(inbound).powi(2))).sqrt() * norm + mu * ( inbound - norm.dot(inbound) * norm);
-
                 let t_ray = Ray::new(t_dir, intercept.location);
-
-                // dbg!(inbound.elems());
-                // dbg!(norm.elems());
-                // dbg!(t_ray.direction.elems());
-
                 transmit_values = project_ray(t_ray, surfaces, light_sources, n2_refractive_index, bounces_remaining, None);
                 
             };
@@ -513,23 +504,39 @@ fn main() {
     let surfaces:Vec<SurfaceBox> = vec![
         Box::new(Sphere{ center: Point{ x: 2.5, y: -5.0, z: 5.0}, radius: 2.5, reflectivity: 0.0, transmissivity: 0.0, refractive_index: 0.0}),
         Box::new(Sphere{ center: Point{ x: 2.5, y: 0.0, z: 5.0}, radius: 1.0, reflectivity: 1.0, transmissivity: 0.0, refractive_index: 0.0}),
-        Box::new(Sphere{ center: Point{ x: 1.5, y: -12.0, z: 5.0}, radius: 1.0, reflectivity: 0.0, transmissivity: 0.6, refractive_index: 1.4}),
+        Box::new(Sphere{ center: Point{ x: 2.5, y: -6.0, z: -2.0}, radius: 2.0, reflectivity: 0.0, transmissivity: 1.0, refractive_index: 1.0  }),
 
-        // Box::new(Plane::new(
-        //     [
-        //         Point{ x: 5.0, y: -5.0, z: 0.0},
-        //         Point{ x: 5.0, y: -10.0, z: 0.0},
-        //         Point{ x: 5.0, y: -10.0, z: 4.0}
-        //     ]
-        // ).add_light_effects(0.0, 0.9, 1.8)),
+        Box::new(Plane::new(
+            [
+                Point{ x: 5.0, y: -5.0, z: 0.0},  //Right
+                Point{ x: 5.0, y: -10.0, z: 0.0}, //Left
+                Point{ x: 5.0, y: -10.0, z: 4.0} //Pointy Bottom
+            ]
+        ).add_light_effects(0.0, 1.0, 1.3)),
 
-        // Box::new(Plane::new(
-        //     [
-        //         Point{ x: 5.1, y: -5.0, z: 0.0},
-        //         Point{ x: 5.1, y: -10.0, z: 0.0},
-        //         Point{ x: 5.1, y: -10.0, z: 4.0}
-        //     ]
-        // ).add_light_effects(0.0, 0.9, 1.8)),
+        Box::new(Plane::new(
+            [
+                Point{ x: 5.0, y: -5.0, z: 0.0},  //Right
+                Point{ x: 5.0, y: -10.0, z: 0.0}, //Left
+                Point{ x: 6.0, y: -10.0, z: 4.0} //Pointy top
+            ]
+        ).add_light_effects(0.0, 1.0, 1.3)),
+
+        Box::new(Plane::new(
+            [
+                Point{ x: 5.0, y: -5.0, z: 0.0},  //Right
+                Point{ x: 6.0, y: -10.0, z: 4.0}, //Pointy top
+                Point{ x: 5.0, y: -10.0, z: 4.0} //Pointy Bottom
+            ]
+        ).add_light_effects(0.0, 1.0, 1.3)),
+
+        Box::new(Plane::new(
+            [
+                Point{ x: 5.0, y: -10.0, z: 0.0}, //Left
+                Point{ x: 6.0, y: -10.0, z: 4.0}, //Pointy top
+                Point{ x: 5.0, y: -10.0, z: 4.0} //Pointy Bottom
+            ]
+        ).add_light_effects(0.0, 0.9, 1.4)),
 
         Box::new(Plane::new(
             [
@@ -597,5 +604,11 @@ fn main() {
     };
 
     render(surfaces, light_sources, viewpoint);
+
+    // let s = Sphere{ center: Point{ x: 0.0, y: 0.0, z: 0.0}, radius: 1.0, reflectivity: 0.0, transmissivity: 0.0, refractive_index: 0.0 };
+    // let r = Ray::new(Point{x: -1.0, y: 0.0, z:0.0}, Point{x: -0.99, y: 0.0, z:0.0});
+
+    // s.intercept(&r);
+
     
 }
