@@ -129,12 +129,17 @@ pub struct Intercept {
 pub trait Surface {
     fn intercept(&self, ray: &Ray) -> Option<Intercept>;
     fn get_norm(&self, location: Point) -> Point;
+    fn get_relfectivity(&self) -> f64;
+    fn get_transmission_props(&self) -> (f64, f64);
 }
 
 pub struct Sphere {
     // (P - P0)^2 -  r^2 = 0
     pub center: Point,
     pub radius: f64,
+    pub reflectivity: f64, 
+    pub transmissivity: f64,
+    pub refractive_index: f64,
 }
 
 impl Surface for Sphere {
@@ -148,6 +153,11 @@ impl Surface for Sphere {
             None
         } else {
             let t = (-b - discriminant.sqrt()) / (2.0*a);
+
+            if t < 0.0 {
+                return None
+            }
+
             let p = ray.origin + t * ray.direction;
             Some(Intercept{location: p, distance: t})
         }
@@ -156,13 +166,24 @@ impl Surface for Sphere {
     fn get_norm(&self, location: Point) -> Point {
         (location - self.center).unit()
     }
+
+    fn get_relfectivity(&self) -> f64 {
+        self.reflectivity
+    }
+
+    fn get_transmission_props(&self) -> (f64, f64) {
+        (self.transmissivity, self.refractive_index)
+    }
 }
 
 pub struct Plane {
     // P * norm + d = 0`
     pub norm: Point,
     pub d: f64,
-    pub bounds: Option<[Point; 3]>
+    pub bounds: Option<[Point; 3]>,
+    pub reflectivity: f64,
+    pub transmissivity: f64,
+    pub refractive_index: f64
 }
 
 impl Plane {
@@ -202,6 +223,17 @@ impl Plane {
         (p.dot(unit_dir) + d1) > 0.0 
     }
 
+    fn add_light_effects(&self, reflectivity: f64, transmissivity: f64, refractive_index: f64) -> Plane {
+        Plane {
+            norm: self.norm,
+            d: self.d,
+            bounds: self.bounds,
+            reflectivity: reflectivity,
+            transmissivity: transmissivity,
+            refractive_index: refractive_index
+        }
+    }
+
     fn new(bounds: [Point; 3]) -> Plane {
         let v1 = bounds[1] - bounds[0];
         let v2 = bounds[2] - bounds[0];
@@ -212,7 +244,10 @@ impl Plane {
         Plane {
             norm: n,
             d: d,
-            bounds: Some(bounds)
+            bounds: Some(bounds),
+            reflectivity: 0.0,
+            transmissivity: 0.0,
+            refractive_index: 0.0
         }
     }
 
@@ -247,8 +282,16 @@ impl Surface for Plane {
         }
     }
 
-    fn get_norm(&self, location: Point) -> Point {
+    fn get_norm(&self, _location: Point) -> Point {
         self.norm
+    }
+
+    fn get_relfectivity(&self) -> f64 {
+        self.reflectivity
+    }
+
+    fn get_transmission_props(&self) -> (f64, f64) {
+        (self.transmissivity, self.refractive_index)
     }
 }
 
@@ -299,6 +342,132 @@ impl ViewPoint {
 
 type SurfaceBox = Box<dyn Surface>;
 
+fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSource>, refractive_index: f64, bounces_remaining: u8, origin_surface: Option<&SurfaceBox>) -> (f64, f64, f64) {
+    let mut combined_values = (0.0, 0.0, 0.0);
+    let mut light_values = (0.0, 0.0, 0.0);
+    let mut bounce_values = (0.0, 0.0, 0.0);
+    let mut transmit_values = (0.0, 0.0, 0.0);
+
+
+    let mut smallest_intercept = None;
+    for plane in surfaces {
+
+        let check_for_collision = match origin_surface {
+            None => true,
+            Some(os) => !std::ptr::eq(os, plane)
+        };
+
+        // if ! check_for_collision {
+        //     dbg!("Not checking");
+        // }
+
+        if check_for_collision {
+            match plane.intercept(&ray) {
+                None => {},
+                Some(intercept) => {
+                    match smallest_intercept {
+                        None => { 
+                            smallest_intercept = Some((intercept, plane));
+                        
+                        },
+                        Some(existing) => {
+                            if intercept.distance < existing.0.distance {
+                                smallest_intercept = Some((intercept, plane))
+                            }
+                        }
+                    }
+                }   
+            };
+        }
+    }
+
+    match smallest_intercept {
+        None => {},
+        Some((intercept, surf)) => {
+
+            let reflectivity = surf.get_relfectivity();
+
+            let norm = surf.get_norm(intercept.location);
+            let inbound = ray.direction;
+
+
+            if reflectivity > 0.0 && bounces_remaining > 0 {
+
+                // dbg!(inbound.elems());
+                // dbg!(norm.elems());
+                // dbg!(t_ray.direction.elems());
+
+                let bounce_dir = inbound - 2.0 * (inbound.dot(norm) * norm);
+                let b_ray = Ray::new(bounce_dir, intercept.location);
+
+                bounce_values = project_ray(b_ray, surfaces, light_sources, refractive_index, bounces_remaining - 1, Some(&Box::new(surf)));
+            }
+
+            let (transmissivity, n2_refractive_index) = surf.get_transmission_props();
+
+            if transmissivity > 0.0 {
+                let mut mu = refractive_index/n2_refractive_index;
+                if n2_refractive_index == refractive_index {
+                    // dbg!("flipping back");
+                    mu = n2_refractive_index/1.0;
+                }
+
+                let t_dir = (1.0 - mu*mu * (1.0 - norm.dot(inbound).powi(2))).sqrt() * norm + mu * ( inbound - norm.dot(inbound) * norm);
+
+                let t_ray = Ray::new(t_dir, intercept.location);
+
+                // dbg!(inbound.elems());
+                // dbg!(norm.elems());
+                // dbg!(t_ray.direction.elems());
+
+                transmit_values = project_ray(t_ray, surfaces, light_sources, n2_refractive_index, bounces_remaining, None);
+                
+            };
+
+            for source in light_sources {
+                let source_dir = source.origin - intercept.location;
+                let ray_to_source = Ray::new(source_dir, intercept.location);
+ 
+                let mut has_any_collision = false;
+                for obstruction_plane in surfaces {
+                    if !std::ptr::eq(surf, obstruction_plane) {
+                        match obstruction_plane.intercept(&ray_to_source) {
+                            None => {},
+                            Some(_intercept) => {
+                                has_any_collision = true;
+                            }
+                        }
+                    }
+                }
+
+                if !has_any_collision {
+
+                    let intensity = ray_to_source.direction.dot(surf.get_norm(intercept.location)).abs() * 2.0 / ray_to_source.magnitude.cbrt();
+
+                    light_values = (
+                        source.color[0] * intensity + light_values.0,
+                        source.color[1] * intensity + light_values.1,
+                        source.color[2] * intensity + light_values.2                                            
+                    )
+                }
+            }
+
+            combined_values = (
+                reflectivity * bounce_values.0 + (1.0 - reflectivity) * transmissivity * transmit_values.0 + (1.0 - reflectivity - (1.0 - reflectivity) * transmissivity) * light_values.0,
+                reflectivity * bounce_values.1 + (1.0 - reflectivity) * transmissivity * transmit_values.1 + (1.0 - reflectivity - (1.0 - reflectivity) * transmissivity) * light_values.1,
+                reflectivity * bounce_values.2 + (1.0 - reflectivity) * transmissivity * transmit_values.2 + (1.0 - reflectivity - (1.0 - reflectivity) * transmissivity) * light_values.2,
+            );
+
+        }
+    }
+    
+    combined_values
+}
+
+// fn combine_values(reflectivity: f64, transmissivity: f64, index: usize, bounce_values: (f64, f64, f64), light_values: (f64, f64, f64), transmit_values: (f64, f64, f64)) -> f64 {
+//     reflectivity * bounce_values[index] + (1.0 - reflectivity) * light_values.index
+// }
+
 fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint) {
     let mut img = ImageBuffer::from_fn(viewpoint.resolution.0, viewpoint.resolution.1, |_x, _y| { 
         image::Rgb([0u8,0u8,0u8])
@@ -314,66 +483,11 @@ fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint:
         for i in 0..viewpoint.resolution.0 {
             let current_point =  start_point + (i as f64) * deets.step_size * deets.lengthways + (j as f64) * deets.step_size * (-1.0 * deets.upwards);
             let ray_dir = current_point - viewpoint.origin;
+            let ray = Ray::new(ray_dir, viewpoint.origin);
             
-    
-            let mut smallest_intercept = None;
-
-            for plane in &surfaces {
-                let ray = Ray::new(ray_dir, viewpoint.origin);
-
-                match plane.intercept(&ray) {
-                    None => {},
-                    Some(intercept) => {
-                        match smallest_intercept {
-                            None => { 
-                                smallest_intercept = Some((intercept, plane));
-                            },
-                            Some(existing) => {
-                                if intercept.distance < existing.0.distance {
-                                    smallest_intercept = Some((intercept, plane))
-                                }
-                            }
-                        }
-                    }   
-                };
-            }
-
-            match smallest_intercept {
-                None => {},
-                Some((intercept, plane)) => {
-                    for source in &light_sources {
-                        let source_dir = source.origin - intercept.location;
-                        let ray_to_source = Ray::new(source_dir, intercept.location);
-            
-                        let mut has_any_collision = false;
-                        for obstruction_plane in &surfaces {
-                            if !std::ptr::eq(plane, obstruction_plane) {
-                                match obstruction_plane.intercept(&ray_to_source) {
-                                    None => {},
-                                    Some(_intercept) => {
-                                        has_any_collision = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        if !has_any_collision {
-                            let existing_pix = imbuff[[i as usize,j as usize]];
-
-                            let intensity = ray_to_source.direction.dot(plane.get_norm(intercept.location)).abs() * 2.0 / ray_to_source.magnitude.cbrt();
-
-                            imbuff[[i as usize,j as usize]] = (
-                                source.color[0] * intensity + existing_pix.0,
-                                source.color[1] * intensity + existing_pix.1,
-                                source.color[2] * intensity + existing_pix.2                                            
-                            )
-
-                        }
-                    }
-                }
-            }
+            let bounces_remaining = 2;
+            imbuff[[i as usize,j as usize]] = project_ray(ray, &surfaces, &light_sources, 1.0, bounces_remaining, None)
         }
-
     }
 
     for j in 0..viewpoint.resolution.1 {
@@ -397,7 +511,26 @@ fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint:
 fn main() {
 
     let surfaces:Vec<SurfaceBox> = vec![
-        Box::new(Sphere{ center: Point{ x: 2.5, y: -5.0, z: 5.0}, radius: 2.0}),
+        Box::new(Sphere{ center: Point{ x: 2.5, y: -5.0, z: 5.0}, radius: 2.5, reflectivity: 0.0, transmissivity: 0.0, refractive_index: 0.0}),
+        Box::new(Sphere{ center: Point{ x: 2.5, y: 0.0, z: 5.0}, radius: 1.0, reflectivity: 1.0, transmissivity: 0.0, refractive_index: 0.0}),
+        Box::new(Sphere{ center: Point{ x: 1.5, y: -12.0, z: 5.0}, radius: 1.0, reflectivity: 0.0, transmissivity: 0.6, refractive_index: 1.4}),
+
+        // Box::new(Plane::new(
+        //     [
+        //         Point{ x: 5.0, y: -5.0, z: 0.0},
+        //         Point{ x: 5.0, y: -10.0, z: 0.0},
+        //         Point{ x: 5.0, y: -10.0, z: 4.0}
+        //     ]
+        // ).add_light_effects(0.0, 0.9, 1.8)),
+
+        // Box::new(Plane::new(
+        //     [
+        //         Point{ x: 5.1, y: -5.0, z: 0.0},
+        //         Point{ x: 5.1, y: -10.0, z: 0.0},
+        //         Point{ x: 5.1, y: -10.0, z: 4.0}
+        //     ]
+        // ).add_light_effects(0.0, 0.9, 1.8)),
+
         Box::new(Plane::new(
             [
                 Point{ x: 5.0, y: 0.0, z: 0.0},
@@ -418,7 +551,7 @@ fn main() {
                 Point{ x: 0.0, y: -5.0, z: 0.0},
                 Point{ x: 0.0, y: 0.0, z: 5.0}
             ]
-        )),
+        ).add_light_effects(0.0, 0.0, 0.0)),
         Box::new(Plane::new(
             [
                 Point{ x: 5.0, y: 0.0, z: 0.0},
