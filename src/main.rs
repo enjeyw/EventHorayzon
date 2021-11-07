@@ -67,7 +67,7 @@ fn main() {
                 Point{ x: 0.0, y: -5.0, z: 0.0},
                 Point{ x: 0.0, y: 0.0, z: 5.0}
             ]
-        ).add_light_effects(0.0, 0.0, 0.0)),
+        )),
         Box::new(Plane::new(
             [
                 Point{ x: 5.0, y: 0.0, z: 0.0},
@@ -75,6 +75,24 @@ fn main() {
                 Point{ x: 0.0, y: 0.0, z: -5.0}
             ]
         )),
+
+        Box::new(Plane::new(
+            [
+                Point{ x: 0.0, y: -5.0, z: 0.0},
+                Point{ x: 0.0, y: 5.0, z: 0.0},
+                Point{ x: 0.0, y: 0.0, z: -5.0}
+            ]
+        )),
+        Box::new(Plane::new(
+            [
+                Point{ x: 0.0, y: -5.0, z: 0.0},
+                Point{ x: 0.0, y: 5.0, z: 0.0},
+                Point{ x: 0.0, y: 0.0, z: 5.0}
+            ]
+        )),
+
+
+
         Box::new(Plane::new(
             [
                 Point{ x: -10.0, y: 500.0, z: 500.0},
@@ -108,7 +126,7 @@ fn main() {
     ];
 
 
-    let origin = Point{ x: 14.0, y: -10.0, z: -4.0};
+    let origin = Point{ x: 2.0, y: -20.0, z: -4.0} * 3.0;
     let target = Point{ x: 2.0, y: 0.0, z: 0.0};
 
     let viewpoint = ViewPoint{ 
@@ -120,5 +138,18 @@ fn main() {
         resolution: (1000, 1000)
     };
 
-    render(&mut surfaces, light_sources, viewpoint);
+    fn no_field(_p: Point) -> Point {
+        return Point{x: 0.0, y: 0.0, z: 0.0}
+    }
+    
+    fn attractor(p: Point) -> Point {
+        let hole_loc =  Point{x: 0.0, y: 0.0, z: 0.0};
+        let hole_mass = 0.5;
+        let dist = (p - hole_loc).mag();
+        let scale = hole_mass/dist.powi(2);
+        // let scale = 0.01;
+        return Point{x: -p.x*scale, y: -p.y*scale, z: -p.z*scale}
+    }
+
+    render(&mut surfaces, light_sources, viewpoint, attractor);
 }

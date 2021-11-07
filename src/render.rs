@@ -59,19 +59,6 @@ impl ViewPoint {
     }
 }
 
-fn no_field(p: Point) -> Point {
-    return Point{x: 0.0, y: 0.0, z: 0.0}
-}
-
-fn attractor(p: Point) -> Point {
-    let hole_loc =  Point{x: 0.0, y: 0.0, z: 0.0};
-    let hole_mass = 0.5;
-    let dist = (p - hole_loc).mag();
-    let scale = hole_mass/dist.powi(2);
-    // let scale = 0.01;
-    return Point{x: -p.x*scale, y: -p.y*scale, z: -p.z*scale}
-}
-
 fn raymarch_intercept<'a>(initial_ray: Ray, surfaces: &'a Vec<SurfaceBox>, vec_field: fn(Point) -> Point) -> Option<(Intercept, &'a SurfaceBox)> {
 
     let TIME_STEP = 1.00;
@@ -153,7 +140,7 @@ fn raymarch_intercept<'a>(initial_ray: Ray, surfaces: &'a Vec<SurfaceBox>, vec_f
     None
 }    
 
-pub fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSource>, refractive_index: f64, bounces_remaining: u8) -> F64Color {
+pub fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSource>, vec_field: fn(Point) -> Point, refractive_index: f64, bounces_remaining: u8) -> F64Color {
     let mut combined_values: F64Color = [0.0, 0.0, 0.0];
     let mut light_values: F64Color = [0.0, 0.0, 0.0];
     let mut bounce_values: F64Color = [0.0, 0.0, 0.0];
@@ -181,7 +168,7 @@ pub fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<Lig
     //     };
     // }
 
-    let smallest_intercept = raymarch_intercept(ray.clone(), surfaces, attractor);
+    let smallest_intercept = raymarch_intercept(ray.clone(), surfaces, vec_field);
 
     match smallest_intercept {
         None => {},
@@ -199,7 +186,7 @@ pub fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<Lig
                     let bounce_dir = inbound - 2.0 * (inbound.dot(norm) * norm);
                     let b_ray = Ray::new(bounce_dir, intercept.location);
     
-                    bounce_values = project_ray(b_ray, surfaces, light_sources, refractive_index, bounces_remaining - 1);
+                    bounce_values = project_ray(b_ray, surfaces, light_sources, vec_field, refractive_index, bounces_remaining - 1);
                 }
         
                 if transmissivity > 0.0 {
@@ -217,7 +204,7 @@ pub fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<Lig
     
                     let t_ray = Ray::new(t_dir, intercept.location);
     
-                    transmit_values = project_ray(t_ray, surfaces, light_sources, n2_refractive_index, bounces_remaining - 1);
+                    transmit_values = project_ray(t_ray, surfaces, light_sources, vec_field, n2_refractive_index, bounces_remaining - 1);
                 };
             }
             
@@ -284,7 +271,7 @@ pub fn illuminate_surfaces(surfaces: &mut Vec<SurfaceBox>, light_sources: &Vec<L
 }
 
 
-pub fn render(surfaces: &mut Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint) {
+pub fn render(surfaces: &mut Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint, vec_field: fn(Point) -> Point) {
 
     // illuminate_surfaces(surfaces, &light_sources);
     
@@ -305,7 +292,7 @@ pub fn render(surfaces: &mut Vec<SurfaceBox>, light_sources: Vec<LightSource>, v
             let ray = Ray::new(ray_dir, viewpoint.origin);
             
             let bounces_remaining = 4;
-            imbuff[[i as usize,j as usize]] = project_ray(ray, &surfaces, &light_sources, 1.0, bounces_remaining)
+            imbuff[[i as usize,j as usize]] = project_ray(ray, &surfaces, &light_sources, vec_field, 1.0, bounces_remaining)
         }
     }
 
