@@ -1,5 +1,6 @@
 use crate::point::{Point};
 
+#[derive(Copy, Clone)]
 pub struct Ray {
     // P = P0 + Vt
     pub direction: Point,
@@ -24,11 +25,23 @@ pub struct Intercept {
     // pub norm: Point
 }
 
+
+pub struct Illumination {
+    pub locations: Vec<Point>,
+    pub color: [f64; 3]
+}
+
 pub trait Surface {
     fn intercept(&self, ray: &Ray) -> Option<Intercept>;
     fn get_norm(&self, location: Point) -> Point;
     fn get_relfectivity(&self) -> f64;
     fn get_transmission_props(&self) -> (f64, f64);
+    fn centroidish(&self) -> Point;
+    fn search_radius(&self) -> f64;
+    fn get_has_light(&self) -> bool;
+    fn set_has_light(&mut self, h: bool);
+    fn get_illuminations(&self) -> &Vec<Illumination>;
+    fn add_illumination(&mut self, illumination: Illumination);
 }
 
 pub struct Sphere {
@@ -38,6 +51,8 @@ pub struct Sphere {
     pub reflectivity: f64, 
     pub transmissivity: f64,
     pub refractive_index: f64,
+    pub has_light: bool,
+    pub illuminations: Vec<Illumination>
 }
 
 impl Surface for Sphere {
@@ -88,6 +103,30 @@ impl Surface for Sphere {
     fn get_transmission_props(&self) -> (f64, f64) {
         (self.transmissivity, self.refractive_index)
     }
+
+    fn centroidish(&self) -> Point {
+        self.center
+    }
+
+    fn search_radius(&self) -> f64 {
+        self.radius
+    }
+
+    fn get_has_light(&self) -> bool {
+        self.has_light
+    }
+
+    fn set_has_light(&mut self, h: bool){
+        self.has_light = h;
+    }
+
+    fn get_illuminations(&self) -> &Vec<Illumination> {
+        &self.illuminations
+    }
+
+    fn add_illumination(&mut self, illumination: Illumination) {
+        self.illuminations.push(illumination)
+    }
 }
 
 pub struct Plane {
@@ -97,7 +136,8 @@ pub struct Plane {
     pub bounds: Option<[Point; 3]>,
     pub reflectivity: f64,
     pub transmissivity: f64,
-    pub refractive_index: f64
+    pub refractive_index: f64,
+    pub illuminations: Vec<Illumination>
 }
 
 impl Plane {
@@ -144,7 +184,8 @@ impl Plane {
             bounds: self.bounds,
             reflectivity: reflectivity,
             transmissivity: transmissivity,
-            refractive_index: refractive_index
+            refractive_index: refractive_index,
+            illuminations: Vec::new()
         }
     }
 
@@ -161,7 +202,8 @@ impl Plane {
             bounds: Some(bounds),
             reflectivity: 0.0,
             transmissivity: 0.0,
-            refractive_index: 0.0
+            refractive_index: 0.0,
+            illuminations: Vec::new()
         }
     }
 
@@ -206,5 +248,43 @@ impl Surface for Plane {
 
     fn get_transmission_props(&self) -> (f64, f64) {
         (self.transmissivity, self.refractive_index)
+    }
+
+    fn centroidish(&self) -> Point {
+        // Really bad version for now just to see if the concept even works
+        match self.bounds {
+            Some(bounds) => bounds[0],
+            None => Point{x: 0.0, y: 0.0, z: 0.0}
+        }
+    }
+
+    fn search_radius(&self) -> f64 {
+        match self.bounds {
+            Some(bounds) => { 
+                let b01 = (bounds[0] - bounds[1]).mag();
+                let b20 = (bounds[2] - bounds[0]).mag();
+                if b01 > b20 {
+                    b01
+                } else {
+                    b20
+                }
+            },
+            None => 1.0
+        }
+    }
+
+    fn get_has_light(&self) -> bool {
+        false
+    }
+
+    fn set_has_light(&mut self, _h: bool){
+    }
+
+    fn get_illuminations(&self) -> &Vec<Illumination> {
+        &self.illuminations
+    }
+
+    fn add_illumination(&mut self, illumination: Illumination) {
+        self.illuminations.push(illumination)
     }
 }

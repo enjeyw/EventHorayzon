@@ -9,7 +9,7 @@ mod point;
 use point::{Point};
 
 mod geometry;
-use geometry::{Ray, Plane, Sphere, Surface};
+use geometry::{Intercept, Ray, Plane, Sphere, Surface};
 
 type F64Color = [f64; 3];
 
@@ -66,6 +66,84 @@ impl ViewPoint {
 
 type SurfaceBox = Box<dyn Surface>;
 
+fn raymarch_intercept<'a>(initial_ray: Ray, surfaces: &'a Vec<SurfaceBox>, vec_field: fn(Point) -> Point) -> Option<(Intercept, &'a SurfaceBox)> {
+
+    let TIME_STEP = 1.00;
+    let MAX_STEPS = 1000;
+    let SMALLEST_DISTANCE = 0.00001;
+
+    let mut ray = initial_ray; 
+    let mut speed = 1.0;
+    for stepnumber in 0..MAX_STEPS {
+
+        let distance = speed * TIME_STEP;
+
+        // We compare to a ray start from the original location
+    
+        let mut smallest_intercept = None;
+        for plane in surfaces {
+            match plane.intercept(&ray) {
+                None => {},
+                Some(intercept) => {
+                    if intercept.distance > SMALLEST_DISTANCE && intercept.distance < distance {
+                        match smallest_intercept {
+                            None => { 
+                                smallest_intercept = Some((intercept, plane));
+                            },
+                            Some(existing) => {
+                                if intercept.distance < existing.0.distance {
+                                    smallest_intercept = Some((intercept, plane));
+                                }
+                            }
+                        }                   
+                    }
+                }   
+            };
+        }
+
+        match smallest_intercept {
+            Some((int, surf)) => {
+                return Some((int, surf))
+            }
+            None => {}
+        }
+
+        
+        let current_velocity = ray.direction * speed;
+
+        let new_location = ray.origin + current_velocity * TIME_STEP;
+        let acceleration = vec_field(new_location);
+
+        // dbg!(acceleration.elems());
+
+        let new_velocity = current_velocity + acceleration * TIME_STEP;
+
+        // speed = new_velocity.mag();
+        speed = 1.0;
+
+        // dbg!((new_velocity.unit() - ray.direction).elems());
+
+        ray = Ray::new(new_velocity, new_location);
+
+
+
+    }
+
+    None
+}    
+
+fn no_field(p: Point) -> Point {
+    return Point{x: 0.0, y: 0.0, z: 0.0}
+}
+
+fn attractor(p: Point) -> Point {
+    let hole_loc =  Point{x: 0.0, y: 0.0, z: 0.0};
+    let hole_mass = 0.;
+    let dist = (p - hole_loc).mag();
+    let scale = hole_mass/dist.powi(2);
+    return Point{x: -p.x*scale, y: -p.y*scale, z: -p.z*scale}
+}
+
 fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSource>, refractive_index: f64, bounces_remaining: u8) -> F64Color {
     let mut combined_values: F64Color = [0.0, 0.0, 0.0];
     let mut light_values: F64Color = [0.0, 0.0, 0.0];
@@ -73,26 +151,28 @@ fn project_ray(ray: Ray, surfaces: &Vec<SurfaceBox>, light_sources: &Vec<LightSo
     let mut transmit_values: F64Color = [0.0, 0.0, 0.0];
 
 
-    let mut smallest_intercept = None;
-    for plane in surfaces {
-        match plane.intercept(&ray) {
-            None => {},
-            Some(intercept) => {
-                if intercept.distance > 0.001 {
-                    match smallest_intercept {
-                        None => { 
-                            smallest_intercept = Some((intercept, plane));
-                        },
-                        Some(existing) => {
-                            if intercept.distance < existing.0.distance {
-                                smallest_intercept = Some((intercept, plane))
-                            }
-                        }
-                    }
-                }
-            }   
-        };
-    }
+    // let mut smallest_intercept = None;
+    // for plane in surfaces {
+    //     match plane.intercept(&ray) {
+    //         None => {},
+    //         Some(intercept) => {
+    //             if intercept.distance > 0.001 {
+    //                 match smallest_intercept {
+    //                     None => { 
+    //                         smallest_intercept = Some((intercept, plane)); 
+    //                     },
+    //                     Some(existing) => {
+    //                         if intercept.distance < existing.0.distance {
+    //                             smallest_intercept = Some((intercept, plane))
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }   
+    //     };
+    // }
+
+    let smallest_intercept = raymarch_intercept(ray.clone(), surfaces, attractor);
 
     match smallest_intercept {
         None => {},
@@ -176,8 +256,30 @@ fn combine_values(index: usize, reflectivity: f64, transmissivity: f64, bounce_v
     reflectivity * bounce_values[index] + transmissivity * transmit_values[index] + (1.0 - reflectivity - (1.0 - reflectivity) * transmissivity) * light_values[index]
 }
 
-fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint) {
-    let mut img = ImageBuffer::from_fn(viewpoint.resolution.0, viewpoint.resolution.1, |_x, _y| { 
+fn has_light_effect(surface: &SurfaceBox) -> bool {
+    let reflectivity = surface.get_relfectivity();
+    let (transmissivity, _) = surface.get_transmission_props();
+    reflectivity > 0.0 || transmissivity > 0.0
+}
+
+fn illuminate_surfaces(surfaces: &mut Vec<SurfaceBox>, light_sources: &Vec<LightSource>) {
+
+    for s in surfaces {
+        if has_light_effect(s) {
+            let target = s.centroidish();
+            for l in light_sources {
+                s.search_radius();
+            }
+        }
+    }
+}
+
+
+fn render(surfaces: &mut Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint) {
+
+    // illuminate_surfaces(surfaces, &light_sources);
+    
+    let mut img = ImageBuffer   ::from_fn(viewpoint.resolution.0, viewpoint.resolution.1, |_x, _y| { 
         image::Rgb([0u8,0u8,0u8])
     });
 
@@ -216,13 +318,13 @@ fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint:
 
 }
 
+
 fn main() {
 
-    let surfaces:Vec<SurfaceBox> = vec![
-        Box::new(Sphere{ center: Point{ x: 2.5, y: -5.0, z: 5.0}, radius: 2.5, reflectivity: 1.0, transmissivity: 0.0, refractive_index: 0.0}),
-        Box::new(Sphere{ center: Point{ x: 2.5, y: 0.0, z: 5.0}, radius: 1.0, reflectivity: 0.0, transmissivity: 0.0, refractive_index: 0.0}),
-        Box::new(Sphere{ center: Point{ x: 2.5, y: -6.0, z: -2.0}, radius: 2.0, reflectivity: 0.4, transmissivity: 1.0, refractive_index: 1.5 }),
-
+    let mut surfaces:Vec<SurfaceBox> = vec![
+        Box::new(Sphere{ center: Point{ x: 2.5, y: -5.0, z: 5.0}, radius: 2.5, reflectivity: 0.0, transmissivity: 0.0, refractive_index: 0.0, has_light: false, illuminations: Vec::new()}),
+        Box::new(Sphere{ center: Point{ x: 2.5, y: 0.0, z: 5.0}, radius: 1.0, reflectivity: 0.0, transmissivity: 0.0, refractive_index: 0.0, has_light: false, illuminations: Vec::new()}),
+        Box::new(Sphere{ center: Point{ x: 2.5, y: -6.0, z: -2.0}, radius: 2.0, reflectivity: 0.4, transmissivity: 1.0, refractive_index: 1.5, has_light: false, illuminations: Vec::new()}),
         Box::new(Plane::new(
             [
                 Point{ x: 5.0, y: -5.0, z: 0.0},  //Right
@@ -325,8 +427,8 @@ fn main() {
         up: Point{ x: 1.0, y: 0.0, z: 0.0},
         distance: 1.0,
         width: 3.0,
-        resolution: (4000, 4000)
+        resolution: (1000, 1000)
     };
 
-    render(surfaces, light_sources, viewpoint);
+    render(&mut surfaces, light_sources, viewpoint);
 }
