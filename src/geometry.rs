@@ -288,3 +288,4 @@ impl Surface for Plane {
         self.illuminations.push(illumination)
     }
 }
+
