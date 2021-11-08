@@ -126,7 +126,7 @@ fn main() {
     ];
 
 
-    let origin = Point{ x: 2.0, y: -20.0, z: -4.0} * 3.0;
+    let origin = Point{ x: 10.0, y: -20.0, z: -4.0};
     let target = Point{ x: 2.0, y: 0.0, z: 0.0};
 
     let viewpoint = ViewPoint{ 
@@ -135,7 +135,7 @@ fn main() {
         up: Point{ x: 1.0, y: 0.0, z: 0.0},
         distance: 1.0,
         width: 3.0,
-        resolution: (1000, 1000)
+        resolution: (2000, 2000)
     };
 
     fn no_field(_p: Point) -> Point {

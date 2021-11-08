@@ -2,6 +2,8 @@ use std::cmp::{ min };
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
+use threadpool::ThreadPool;
+
 use std::thread::JoinHandle;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
@@ -38,7 +40,9 @@ pub struct ViewPointDeets {
     pub upwards: Point
 }
 
-static NTHREADS: u32 = 16;
+static NWORKERS: usize = 16;
+static NJOBS: u32 = 1000;
+
 
 impl ViewPoint {
     fn get_viewpoint_deets(&self) -> ViewPointDeets {
@@ -281,7 +285,7 @@ pub fn illuminate_surfaces(surfaces: &mut Vec<SurfaceBox>, light_sources: &Vec<L
     }
 }
 
-fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: &Vec<LightSource>, viewpoint: &ViewPoint, vec_field: fn(Point) -> Point, id: u32, sender: Sender<Option<(u32, u32, F64Color)>>) -> JoinHandle<()> {
+fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: &Vec<LightSource>, viewpoint: &ViewPoint, vec_field: fn(Point) -> Point, id: u32, pool: &ThreadPool, sender: Sender<Option<(u32, u32, F64Color)>>) {
     let deets = viewpoint.get_viewpoint_deets();
     let start_point = deets.top_left;
 
@@ -289,12 +293,16 @@ fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: &Vec<LightSour
     let light_sources_clone = light_sources.clone();
 
     // Ensure we don't miss pixels due to rounding errors
-    let thread_pixel_width = viewclone.resolution.1 / NTHREADS + 1;
 
-    let min_j = id * thread_pixel_width;
-    let max_j = min((id + 1) * thread_pixel_width, viewclone.resolution.1); 
+    let mut thread_pixel_height = viewclone.resolution.1 / NJOBS;
+    if thread_pixel_height * NJOBS !=  viewclone.resolution.1 {
+        thread_pixel_height += 1;
+    }
 
-    thread::spawn(move || {
+    let min_j = id * thread_pixel_height;
+    let max_j = min((id + 1) * thread_pixel_height, viewclone.resolution.1); 
+
+    pool.execute(move || {
         for j in min_j..max_j {
             for i in 0..viewclone.resolution.0 {
                 let current_point =  start_point + (i as f64) * deets.step_size * deets.lengthways + (j as f64) * deets.step_size * (-1.0 * deets.upwards);
@@ -306,10 +314,12 @@ fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: &Vec<LightSour
                 sender.send(Some((i, j, color))).unwrap();
             }
         }
+        
+        // dbg!("threaddone");
 
         sender.send(None).unwrap();
 
-    })
+    });
 }
 
 pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint, vec_field: fn(Point) -> Point) {    
@@ -325,16 +335,18 @@ pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpo
     let (tx, rx): (Sender<Option<(u32, u32, F64Color)>>, Receiver<Option<(u32, u32, F64Color)>>) = mpsc::channel();
     let mut children = Vec::new();
 
-    for id in 0..NTHREADS {
+    let pool = ThreadPool::new(NWORKERS);
+
+    for id in 0..NJOBS {
         let thread_tx = tx.clone();
-        let child = threaded_render(arc_surfaces.clone(), &light_sources, &viewpoint, vec_field, id, thread_tx);
+        let child = threaded_render(arc_surfaces.clone(), &light_sources, &viewpoint, vec_field, id, &pool, thread_tx);
 
         children.push(child);
 
     }
 
     let mut completed_threads = 0;
-    while completed_threads < NTHREADS {
+    while completed_threads < NJOBS {
         let rx = rx.recv().unwrap();
         match rx {
             Some((i, j, color))=> {
@@ -352,25 +364,5 @@ pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpo
         }
     }
 
-    for child in children {
-        child.join().expect("oops! the child thread panicked");
-    }
-
-    
-    // for j in 0..viewpoint.resolution.1 {
-    //     for i in 0..viewpoint.resolution.0 {
-    //         let existing_pix = imbuff[[i as usize,j as usize]];
-                                    
-    //         let pixel = image::Rgb([
-    //             min(existing_pix[0] as u8, 255),
-    //             min(existing_pix[1] as u8, 255),
-    //             min(existing_pix[2] as u8, 255),
-    //             ]);
-
-    //         img.put_pixel(i, j, pixel);
-    //     }
-    // }
-
     img.save("out/test.png").unwrap();
-
 }
