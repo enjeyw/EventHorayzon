@@ -291,9 +291,6 @@ fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: &Vec<LightSour
     // Ensure we don't miss pixels due to rounding errors
     let thread_pixel_width = viewclone.resolution.1 / NTHREADS + 1;
 
-    dbg!(viewclone.resolution.1);
-    dbg!(thread_pixel_width);
-
     let min_j = id * thread_pixel_width;
     let max_j = min((id + 1) * thread_pixel_width, viewclone.resolution.1); 
 
