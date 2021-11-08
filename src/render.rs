@@ -2,6 +2,9 @@ use std::cmp::{ min };
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
+use std::thread::JoinHandle;
+use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc;
 
 use ndarray::prelude::*;
 use image::{ ImageBuffer };
@@ -34,6 +37,8 @@ pub struct ViewPointDeets {
     pub lengthways: Point,
     pub upwards: Point
 }
+
+static NTHREADS: u32 = 1;
 
 impl ViewPoint {
     fn get_viewpoint_deets(&self) -> ViewPointDeets {
@@ -276,39 +281,80 @@ pub fn illuminate_surfaces(surfaces: &mut Vec<SurfaceBox>, light_sources: &Vec<L
     }
 }
 
-fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: Vec<LightSource>, viewpoint: &ViewPoint, vec_field: fn(Point) -> Point) {
-    let mut imbuff = Array::from_elem((viewpoint.resolution.0 as usize, viewpoint.resolution.1 as usize), [0.0, 0.0, 0.0]);
-
+fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: &Vec<LightSource>, viewpoint: &ViewPoint, vec_field: fn(Point) -> Point, id: u32, sender: Sender<Option<(u32, u32, F64Color)>>) -> JoinHandle<()> {
     let deets = viewpoint.get_viewpoint_deets();
     let start_point = deets.top_left;
 
     let viewclone = viewpoint.clone();
     let light_sources_clone = light_sources.clone();
-    let thread_join_handle = thread::spawn(move || {
-        for j in 0..viewclone.resolution.1 {
+
+    let thread_pixel_width = viewclone.resolution.1 / NTHREADS;
+
+    let min_j = id * thread_pixel_width;
+    let max_j = (id + 1) * thread_pixel_width; 
+
+    thread::spawn(move || {
+        for j in min_j..max_j {
             for i in 0..viewclone.resolution.0 {
                 let current_point =  start_point + (i as f64) * deets.step_size * deets.lengthways + (j as f64) * deets.step_size * (-1.0 * deets.upwards);
                 let ray_dir = current_point - viewclone.origin;
                 let ray = Ray::new(ray_dir, viewclone.origin);
                 
                 let bounces_remaining = 4;
-                imbuff[[i as usize,j as usize]] = project_ray(ray, &(*surfaces), &light_sources_clone, vec_field, 1.0, bounces_remaining);
+                let color = project_ray(ray, &(*surfaces), &light_sources_clone, vec_field, 1.0, bounces_remaining);
+                sender.send(Some((i, j, color))).unwrap();
             }
         }
-    }).join();
+
+        sender.send(None).unwrap();
+
+    })
 }
 
-pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint, vec_field: fn(Point) -> Point) {
+pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint, vec_field: fn(Point) -> Point) {    
+    // let mut imbuff = Array::from_elem((viewpoint.resolution.0 as usize, viewpoint.resolution.1 as usize), [0.0, 0.0, 0.0]);
 
-    // illuminate_surfaces(surfaces, &light_sources);
-    
-    let mut img = ImageBuffer   ::from_fn(viewpoint.resolution.0, viewpoint.resolution.1, |_x, _y| { 
+
+    let mut img = ImageBuffer::from_fn(viewpoint.resolution.0, viewpoint.resolution.1, |_x, _y| { 
         image::Rgb([0u8,0u8,0u8])
     });
 
     let arc_surfaces = Arc::new(surfaces);
 
-    threaded_render(arc_surfaces.clone(), light_sources, &viewpoint, vec_field)
+    let (tx, rx): (Sender<Option<(u32, u32, F64Color)>>, Receiver<Option<(u32, u32, F64Color)>>) = mpsc::channel();
+    let mut children = Vec::new();
+
+    for id in 0..NTHREADS {
+        let thread_tx = tx.clone();
+        let child = threaded_render(arc_surfaces.clone(), &light_sources, &viewpoint, vec_field, id, thread_tx);
+
+        children.push(child);
+
+    }
+
+    let mut completed_threads = 0;
+    while completed_threads < NTHREADS {
+        let rx = rx.recv().unwrap();
+        match rx {
+            Some((i, j, color))=> {
+                let pixel = image::Rgb([
+                    min(color[0] as u8, 255),
+                    min(color[1] as u8, 255),
+                    min(color[2] as u8, 255),
+                    ]);
+    
+                img.put_pixel(i, j, pixel);
+            },
+            None => {
+                completed_threads += 1;
+            }
+        }
+    }
+
+    for child in children {
+        child.join().expect("oops! the child thread panicked");
+    }
+
     
     // for j in 0..viewpoint.resolution.1 {
     //     for i in 0..viewpoint.resolution.0 {
@@ -324,6 +370,6 @@ pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpo
     //     }
     // }
 
-    // img.save("out/test.png").unwrap();
+    img.save("out/test.png").unwrap();
 
 }
