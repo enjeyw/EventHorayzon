@@ -1,4 +1,6 @@
 use std::cmp::{ min };
+use std::rc::Rc;
+use std::sync::Arc;
 use std::thread;
 
 use ndarray::prelude::*;
@@ -274,13 +276,14 @@ pub fn illuminate_surfaces(surfaces: &mut Vec<SurfaceBox>, light_sources: &Vec<L
     }
 }
 
-fn threaded_render(surfaces: &'static Vec<SurfaceBox>, light_sources: &'static Vec<LightSource>, viewpoint: &ViewPoint, vec_field: fn(Point) -> Point) {
+fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: Vec<LightSource>, viewpoint: &ViewPoint, vec_field: fn(Point) -> Point) {
     let mut imbuff = Array::from_elem((viewpoint.resolution.0 as usize, viewpoint.resolution.1 as usize), [0.0, 0.0, 0.0]);
 
     let deets = viewpoint.get_viewpoint_deets();
     let start_point = deets.top_left;
 
     let viewclone = viewpoint.clone();
+    let light_sources_clone = light_sources.clone();
     let thread_join_handle = thread::spawn(move || {
         for j in 0..viewclone.resolution.1 {
             for i in 0..viewclone.resolution.0 {
@@ -289,10 +292,10 @@ fn threaded_render(surfaces: &'static Vec<SurfaceBox>, light_sources: &'static V
                 let ray = Ray::new(ray_dir, viewclone.origin);
                 
                 let bounces_remaining = 4;
-                imbuff[[i as usize,j as usize]] = project_ray(ray, surfaces, light_sources, vec_field, 1.0, bounces_remaining);
+                imbuff[[i as usize,j as usize]] = project_ray(ray, &(*surfaces), &light_sources_clone, vec_field, 1.0, bounces_remaining);
             }
         }
-    });
+    }).join();
 }
 
 pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint, vec_field: fn(Point) -> Point) {
@@ -303,8 +306,9 @@ pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpo
         image::Rgb([0u8,0u8,0u8])
     });
 
+    let arc_surfaces = Arc::new(surfaces);
 
-    threaded_render(&surfaces, &light_sources, &viewpoint, vec_field)
+    threaded_render(arc_surfaces.clone(), light_sources, &viewpoint, vec_field)
     
     // for j in 0..viewpoint.resolution.1 {
     //     for i in 0..viewpoint.resolution.0 {
