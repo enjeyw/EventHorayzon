@@ -1,18 +1,22 @@
 use std::cmp::{ min };
+use std::thread;
+
 use ndarray::prelude::*;
 use image::{ ImageBuffer };
 
 use crate::geometry::{Intercept, Ray, Surface};
 use crate::point::{Point};
 
-pub type SurfaceBox = Box<dyn Surface>;
+pub type SurfaceBox = Box<dyn Surface + Sync + Send + 'static>;
 type F64Color = [f64; 3];
 
+#[derive(Copy, Clone)]
 pub struct LightSource {
     pub origin: Point,
     pub color: F64Color
 }
 
+#[derive(Copy, Clone)]
 pub struct ViewPoint {
     pub origin: Point,
     pub direction: Point,
@@ -270,8 +274,28 @@ pub fn illuminate_surfaces(surfaces: &mut Vec<SurfaceBox>, light_sources: &Vec<L
     }
 }
 
+fn threaded_render(surfaces: &'static Vec<SurfaceBox>, light_sources: &'static Vec<LightSource>, viewpoint: &ViewPoint, vec_field: fn(Point) -> Point) {
+    let mut imbuff = Array::from_elem((viewpoint.resolution.0 as usize, viewpoint.resolution.1 as usize), [0.0, 0.0, 0.0]);
 
-pub fn render(surfaces: &mut Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint, vec_field: fn(Point) -> Point) {
+    let deets = viewpoint.get_viewpoint_deets();
+    let start_point = deets.top_left;
+
+    let viewclone = viewpoint.clone();
+    let thread_join_handle = thread::spawn(move || {
+        for j in 0..viewclone.resolution.1 {
+            for i in 0..viewclone.resolution.0 {
+                let current_point =  start_point + (i as f64) * deets.step_size * deets.lengthways + (j as f64) * deets.step_size * (-1.0 * deets.upwards);
+                let ray_dir = current_point - viewclone.origin;
+                let ray = Ray::new(ray_dir, viewclone.origin);
+                
+                let bounces_remaining = 4;
+                imbuff[[i as usize,j as usize]] = project_ray(ray, surfaces, light_sources, vec_field, 1.0, bounces_remaining);
+            }
+        }
+    });
+}
+
+pub fn render(surfaces: Vec<SurfaceBox>, light_sources: Vec<LightSource>, viewpoint: ViewPoint, vec_field: fn(Point) -> Point) {
 
     // illuminate_surfaces(surfaces, &light_sources);
     
@@ -279,37 +303,23 @@ pub fn render(surfaces: &mut Vec<SurfaceBox>, light_sources: Vec<LightSource>, v
         image::Rgb([0u8,0u8,0u8])
     });
 
-    let mut imbuff = Array::from_elem((viewpoint.resolution.0 as usize, viewpoint.resolution.1 as usize), [0.0, 0.0, 0.0]);
 
-    let deets = viewpoint.get_viewpoint_deets();
-
-    let start_point = deets.top_left;
-
-    for j in 0..viewpoint.resolution.1 {
-        for i in 0..viewpoint.resolution.0 {
-            let current_point =  start_point + (i as f64) * deets.step_size * deets.lengthways + (j as f64) * deets.step_size * (-1.0 * deets.upwards);
-            let ray_dir = current_point - viewpoint.origin;
-            let ray = Ray::new(ray_dir, viewpoint.origin);
-            
-            let bounces_remaining = 4;
-            imbuff[[i as usize,j as usize]] = project_ray(ray, &surfaces, &light_sources, vec_field, 1.0, bounces_remaining)
-        }
-    }
-
-    for j in 0..viewpoint.resolution.1 {
-        for i in 0..viewpoint.resolution.0 {
-            let existing_pix = imbuff[[i as usize,j as usize]];
+    threaded_render(&surfaces, &light_sources, &viewpoint, vec_field)
+    
+    // for j in 0..viewpoint.resolution.1 {
+    //     for i in 0..viewpoint.resolution.0 {
+    //         let existing_pix = imbuff[[i as usize,j as usize]];
                                     
-            let pixel = image::Rgb([
-                min(existing_pix[0] as u8, 255),
-                min(existing_pix[1] as u8, 255),
-                min(existing_pix[2] as u8, 255),
-                ]);
+    //         let pixel = image::Rgb([
+    //             min(existing_pix[0] as u8, 255),
+    //             min(existing_pix[1] as u8, 255),
+    //             min(existing_pix[2] as u8, 255),
+    //             ]);
 
-            img.put_pixel(i, j, pixel);
-        }
-    }
+    //         img.put_pixel(i, j, pixel);
+    //     }
+    // }
 
-    img.save("out/test.png").unwrap();
+    // img.save("out/test.png").unwrap();
 
 }

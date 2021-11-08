@@ -25,7 +25,7 @@ pub struct Intercept {
     // pub norm: Point
 }
 
-
+#[derive(Clone)]
 pub struct Illumination {
     pub locations: Vec<Point>,
     pub color: [f64; 3]
@@ -44,6 +44,7 @@ pub trait Surface {
     fn add_illumination(&mut self, illumination: Illumination);
 }
 
+#[derive(Clone)]
 pub struct Sphere {
     // (P - P0)^2 -  r^2 = 0
     pub center: Point,
