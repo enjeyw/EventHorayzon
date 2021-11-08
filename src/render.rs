@@ -38,7 +38,7 @@ pub struct ViewPointDeets {
     pub upwards: Point
 }
 
-static NTHREADS: u32 = 1;
+static NTHREADS: u32 = 16;
 
 impl ViewPoint {
     fn get_viewpoint_deets(&self) -> ViewPointDeets {
@@ -288,10 +288,14 @@ fn threaded_render(surfaces: Arc<Vec<SurfaceBox>>, light_sources: &Vec<LightSour
     let viewclone = viewpoint.clone();
     let light_sources_clone = light_sources.clone();
 
-    let thread_pixel_width = viewclone.resolution.1 / NTHREADS;
+    // Ensure we don't miss pixels due to rounding errors
+    let thread_pixel_width = viewclone.resolution.1 / NTHREADS + 1;
+
+    dbg!(viewclone.resolution.1);
+    dbg!(thread_pixel_width);
 
     let min_j = id * thread_pixel_width;
-    let max_j = (id + 1) * thread_pixel_width; 
+    let max_j = min((id + 1) * thread_pixel_width, viewclone.resolution.1); 
 
     thread::spawn(move || {
         for j in min_j..max_j {
