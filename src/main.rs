@@ -11,7 +11,7 @@ use render::{SurfaceBox, LightSource, ViewPoint, render};
 
 fn main() {
 
-    let mut surfaces:Vec<SurfaceBox> = vec![
+    let surfaces: Vec<SurfaceBox> = vec![
         Box::new(Sphere{ center: Point{ x: 2.5, y: -5.0, z: 5.0}, radius: 2.5, reflectivity: 1.0, transmissivity: 0.0, refractive_index: 0.0, has_light: false, illuminations: Vec::new()}),
         Box::new(Sphere{ center: Point{ x: 2.5, y: 0.0, z: 5.0}, radius: 1.0, reflectivity: 0.0, transmissivity: 0.0, refractive_index: 0.0, has_light: false, illuminations: Vec::new()}),
         Box::new(Sphere{ center: Point{ x: 2.5, y: -6.0, z: -2.0}, radius: 2.0, reflectivity: 0.4, transmissivity: 1.0, refractive_index: 1.5, has_light: false, illuminations: Vec::new()}),
@@ -126,7 +126,7 @@ fn main() {
     ];
 
 
-    let origin = Point{ x: 2.0, y: -20.0, z: -4.0} * 3.0;
+    let origin = Point{ x: 10.0, y: -20.0, z: -4.0};
     let target = Point{ x: 2.0, y: 0.0, z: 0.0};
 
     let viewpoint = ViewPoint{ 
@@ -135,7 +135,7 @@ fn main() {
         up: Point{ x: 1.0, y: 0.0, z: 0.0},
         distance: 1.0,
         width: 3.0,
-        resolution: (1000, 1000)
+        resolution: (2000, 2000)
     };
 
     fn no_field(_p: Point) -> Point {
@@ -151,5 +151,5 @@ fn main() {
         return Point{x: -p.x*scale, y: -p.y*scale, z: -p.z*scale}
     }
 
-    render(&mut surfaces, light_sources, viewpoint, attractor);
+    render(surfaces, light_sources, viewpoint, attractor);
 }
